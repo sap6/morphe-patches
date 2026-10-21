@@ -22,12 +22,39 @@ public class CaptionsInPipPatch {
     }
 
     /**
+     * Injection point. Called while not in picture-in-picture.
+     *
+     * @return If the overlay is shown in the miniplayer, where YouTube hides the captions overlay.
+     */
+    public static boolean showInMiniplayer(String overlayName) {
+        return Settings.CAPTIONS_IN_MINIPLAYER.get() && CAPTIONS_OVERLAY.equals(overlayName);
+    }
+
+    /**
+     * Injection point.
+     *
+     * @return The player layout state to give the captions overlay, maximized instead of minimized.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static Enum<?> getLayoutState(Enum<?> state) {
+        String name = state.name();
+        if (name.equals("MINIMIZED") || name.equals("SLIDING_MINIMIZED_MAXIMIZED")) {
+            return Enum.valueOf((Class) state.getDeclaringClass(), "MAXIMIZED");
+        }
+        return state;
+    }
+
+    /**
      * Injection point. Used by versions that give overlays the player type instead.
      *
      * @return If the overlay must be shown, even though the player type hides it.
      */
-    public static boolean showInPip(String overlayName, Enum<?> playerType) {
-        return "WATCH_WHILE_PICTURE_IN_PICTURE".equals(playerType.name()) && !isPipActive(overlayName);
+    public static boolean showOverlay(String overlayName, Enum<?> playerType) {
+        return switch (playerType.name()) {
+            case "WATCH_WHILE_PICTURE_IN_PICTURE" -> !isPipActive(overlayName);
+            case "WATCH_WHILE_MINIMIZED", "WATCH_WHILE_SLIDING_MINIMIZED_MAXIMIZED" -> showInMiniplayer(overlayName);
+            default -> false;
+        };
     }
 
     /**

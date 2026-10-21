@@ -47,15 +47,17 @@ internal val captionsInPipPatch = bytecodePatch(
     )
 
     execute {
-        settingsMenuCaptionGroup.add(
-            SwitchPreference("morphe_captions_in_pip", summary = true)
-        )
+        settingsMenuCaptionGroup.addAll(listOf(
+            SwitchPreference("morphe_captions_in_pip", summary = true),
+            SwitchPreference("morphe_captions_in_miniplayer", summary = true),
+        ))
 
         val overlayNameMethodName = CaptionsOverlayNameFingerprint.originalMethod.name
         var hooked = false
 
-        // Overlays are given a player state that includes whether picture-in-picture is active.
-        // Report it as inactive to the captions overlay.
+        // Overlays are given a player state that includes whether picture-in-picture is active,
+        // and the player layout. Report picture-in-picture as inactive and a minimized player as maximized
+        // to the captions overlay, which is otherwise hidden in both.
         PlayerOverlayStateToStringFingerprint.instructionMatchesOrNull?.let { matches ->
             val stateType = PlayerOverlayStateToStringFingerprint.originalClassDef.type
             val fieldNames = matches.first().instruction.getReference<StringReference>()!!.string.split(';')
@@ -69,21 +71,38 @@ internal val captionsInPipPatch = bytecodePatch(
                 ?.forEach {
                     it.method.apply {
                         val stateIndex = it.instructionMatches.first().index
-                        val pipRegister = getInstruction(stateIndex).argumentRegister(pipArgument)
+                        val stateCall = getInstruction(stateIndex)
+                        val pipRegister = stateCall.argumentRegister(pipArgument)
+                        // The player layout state, such as maximized or minimized.
+                        val layoutRegister = stateCall.argumentRegister(1)
+                        val layoutType = stateCall.getReference<MethodReference>()!!.parameterTypes.first()
                         val overlayCall = getInstruction<FiveRegisterInstruction>(stateIndex + 1)
                         val overlayType = overlayCall.getReference<MethodReference>()!!.definingClass
+                        val getOverlayName = "invoke-interface { v${overlayCall.registerC} }, " +
+                                "$overlayType->$overlayNameMethodName()Ljava/lang/String;"
 
                         // Placed on the branch target where isPipActive is set, so it runs for both values.
                         // Reuses the isPipActive register because some of these methods have no free registers.
                         addInstructionsAtControlFlowLabel(
                             stateIndex,
                             """
-                                if-eqz v$pipRegister, :not_pip
-                                invoke-interface { v${overlayCall.registerC} }, $overlayType->$overlayNameMethodName()Ljava/lang/String;
+                                if-nez v$pipRegister, :pip
+                                $getOverlayName
+                                move-result-object v$pipRegister
+                                invoke-static/range { v$pipRegister .. v$pipRegister }, $EXTENSION_CLASS->showInMiniplayer(Ljava/lang/String;)Z
+                                move-result v$pipRegister
+                                if-eqz v$pipRegister, :done
+                                invoke-static/range { v$layoutRegister .. v$layoutRegister }, $EXTENSION_CLASS->getLayoutState(Ljava/lang/Enum;)Ljava/lang/Enum;
+                                move-result-object v$layoutRegister
+                                check-cast v$layoutRegister, $layoutType
+                                const/16 v$pipRegister, 0x0
+                                goto :done
+                                :pip
+                                $getOverlayName
                                 move-result-object v$pipRegister
                                 invoke-static/range { v$pipRegister .. v$pipRegister }, $EXTENSION_CLASS->isPipActive(Ljava/lang/String;)Z
                                 move-result v$pipRegister
-                                :not_pip
+                                :done
                                 nop
                             """
                         )
@@ -92,7 +111,7 @@ internal val captionsInPipPatch = bytecodePatch(
                 }
         }
 
-        // Older versions give overlays the player type instead, which can be picture-in-picture.
+        // Older versions give overlays the player type instead, which can be picture-in-picture or minimized.
         // Show the captions overlay anyway.
         getPlayerTypeOverlayVisibilityFingerprint(PlayerTypeEnumFingerprint.originalClassDef.type)
             .matchAllOrNull()
@@ -111,7 +130,7 @@ internal val captionsInPipPatch = bytecodePatch(
                         """
                             invoke-interface { v${overlayCall.registerC} }, $overlayType->$overlayNameMethodName()Ljava/lang/String;
                             move-result-object v$showRegister
-                            invoke-static { v$showRegister, v${overlayCall.registerD} }, $EXTENSION_CLASS->showInPip(Ljava/lang/String;Ljava/lang/Enum;)Z
+                            invoke-static { v$showRegister, v${overlayCall.registerD} }, $EXTENSION_CLASS->showOverlay(Ljava/lang/String;Ljava/lang/Enum;)Z
                             move-result v$showRegister
                         """
                     )
