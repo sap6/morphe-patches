@@ -1,0 +1,69 @@
+# Fork-only: builds the patch bundle from the test branch and publishes it as a "test-build" pre-release,
+# so it can be downloaded on a phone and loaded into Morphe Manager. Not for upstream PRs.
+name: Test build
+
+on:
+  push:
+    branches: [test]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # Keeps Gradle and the downloaded dependencies between runs, like the release workflow.
+      - name: Cache Gradle
+        uses: burrunan/gradle-cache-action@v3
+
+      - name: Build patch bundle
+        env:
+          GITHUB_ACTOR: ${{ github.repository_owner }}
+          GITHUB_TOKEN: ${{ secrets.MORPHE_PACKAGES_TOKEN }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :patches:buildAndroid --no-daemon
+
+      - name: Publish test build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          short_sha=$(git rev-parse --short HEAD)
+          mpp=$(ls patches/build/libs/*.mpp | head -n 1)
+          # Morphe Manager follows this file and updates when version or created_at changes.
+          # It is pushed to its own branch below, because the Manager rewrites github.com links.
+          jq -n \
+            --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+            --arg description "Test build $short_sha from the test branch. Not an official release." \
+            --arg download_url "https://github.com/$GITHUB_REPOSITORY/releases/download/test-build/$(basename "$mpp")" \
+            --arg version "test-$short_sha" \
+            '{created_at: $created_at, description: $description, download_url: $download_url,
+              signature_download_url: "", version: $version}' > patches-bundle.json
+          gh release delete test-build --yes --cleanup-tag || true
+          gh release create test-build "$mpp" patches-bundle.json \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Test build $short_sha" \
+            --notes "Built from the test branch for testing. Not an official release."
+          # Add this to Morphe Manager as a source:
+          # https://raw.githubusercontent.com/<owner>/<repo>/refs/heads/test-build-manifest/patches-bundle.json
+          manifest_dir=$(mktemp -d)
+          cp patches-bundle.json "$manifest_dir"
+          cd "$manifest_dir"
+          git init -q -b test-build-manifest
+          git add patches-bundle.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Test build $short_sha"
+          git push -q -f "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" test-build-manifest
