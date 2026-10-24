@@ -1,0 +1,7 @@
+{
+  "created_at": "2026-10-24T16:54:52",
+  "description": "Test build 2b68f32 from the test branch. Not an official release.",
+  "download_url": "https://github.com/sap6/morphe-patches/releases/download/test-build/patches-1.48.0.mpp",
+  "signature_download_url": "",
+  "version": "test-2b68f32"
+}
