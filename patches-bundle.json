@@ -1,0 +1,7 @@
+{
+  "created_at": "2026-11-05T14:08:45",
+  "description": "Test build 624c54e from the test branch. Not an official release.",
+  "download_url": "https://github.com/sap6/morphe-patches/releases/download/test-build/patches-2.1.0-dev.11.mpp",
+  "signature_download_url": "",
+  "version": "test-624c54e"
+}
